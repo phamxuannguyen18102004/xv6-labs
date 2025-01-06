@@ -15,3 +15,390 @@ index 365c91b..3205e36 100644
  
  
  
+diff --git a/time.txt b/time.txt
+new file mode 100644
+index 0000000..105d7d9
+--- /dev/null
++++ b/time.txt
+@@ -0,0 +1 @@
++100
+\ No newline at end of file
+diff --git a/user/find.c b/user/find.c
+new file mode 100644
+index 0000000..e3e60e7
+--- /dev/null
++++ b/user/find.c
+@@ -0,0 +1,83 @@
++#include "kernel/types.h"
++#include "kernel/stat.h"
++#include "user/user.h"
++#include "kernel/fs.h"
++#include "kernel/fcntl.h"
++
++char*
++fmtname(char *path)
++{
++    char *p;
++
++    // Find first character after last slash.
++    for(p=path+strlen(path); p >= path && *p != '/'; p--)
++        ;
++    p++;
++    // printf("p: %s\n", p);
++    return p; // return file name
++}
++
++void find(char* path, char* file_name) {
++    int fd;
++    char buf[512], *p;
++    struct dirent de;
++    struct stat st;
++    
++    
++    if((fd = open(path, O_RDONLY)) < 0){
++        fprintf(2, "ls: cannot open %s\n", path);
++        return;
++    }
++
++    if((fstat(fd, &st)) < 0) {
++        fprintf(2, "ls: cannot stat %s\n", path);
++        close(fd);
++        return;
++    }
++    // if the path is a file, check if the filename is the same as the file_name
++    // if the path is a directory, find all file the directory with the name file_name and print
++    // check the subdirectories and find all file within it recursively     
++
++    switch (st.type) {
++        case T_FILE:
++            if (strcmp(fmtname(path), file_name) == 0) {
++                printf("%s\n", path);
++            }
++            break;
++        case T_DIR:
++            strcpy(buf, path);
++            p = buf + strlen(buf);
++            *p++ = '/';
++            while (read(fd, &de, sizeof(de)) == sizeof(de)) {
++                if (de.inum == 0) {
++                    continue;
++                }
++
++                // add folder name to p end
++                strcpy(p, de.name);
++
++                if (strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0) {
++                    continue;
++                }
++                
++                find(buf, file_name);
++            }
++            break;
++        
++    }
++    close(fd);
++}
++
++int
++main(int argc, char *argv[]) {
++    // argument checking
++    if (argc != 3) {
++        fprintf(2, "Usage: find <path> <file_name>\n");
++        exit(1);
++    }
++
++    find(argv[1], argv[2]);
++
++    exit(0);
++
++}
+\ No newline at end of file
+diff --git a/user/pingpong.c b/user/pingpong.c
+new file mode 100644
+index 0000000..eff4315
+--- /dev/null
++++ b/user/pingpong.c
+@@ -0,0 +1,58 @@
++#include "kernel/types.h"
++#include "kernel/stat.h"
++#include "user/user.h"
++
++int main(int argc, char *argv[]) {
++
++    // argument handling
++    if (argc != 1) {
++        fprintf(2, "pingpong: no arguments needed\n");
++        exit(1);
++    }
++
++    int fds_p[2]; // file descriptors
++    pipe(fds_p); // create pipe from parent to child
++
++    int fds_c[2];
++    pipe(fds_c); // create pipe from child to parent
++
++    int pid = fork();   
++
++    if (pid > 0) {
++        // parent
++        int pid_parent = getpid();
++        
++        char parent_msg = 's';
++        write(fds_p[1], &parent_msg, 1); 
++
++        close(fds_p[1]);
++        wait(0);
++
++        if(read(fds_c[0], &parent_msg, 1)){
++            printf("%d: received pong\n", pid_parent);
++        }
++
++        close(fds_c[0]);
++        exit(0);
++    }
++    else if (pid == 0) {
++        // child
++        int pid_child = getpid();
++
++        char child_msg;
++        if(read(fds_p[0], &child_msg, 1)){
++            printf("%d: received ping\n", pid_child);
++        }
++        close(fds_p[0]); 
++
++        write(fds_c[1], &child_msg, 1); // write 1 byte to the parent;
++        
++        close(fds_c[1]); // close the write end of the pipe;
++        exit(0); // exit the child;
++    } else {
++        fprintf(2, "fork failed\n");
++        exit(1);
++    }
++    exit(0);
++}
++// Tan's code
+\ No newline at end of file
+diff --git a/user/primes.c b/user/primes.c
+new file mode 100644
+index 0000000..e327a46
+--- /dev/null
++++ b/user/primes.c
+@@ -0,0 +1,67 @@
++#include "kernel/types.h"
++#include "user/user.h"
++
++void sieve(int left_p[2]) __attribute__((noreturn));
++void sieve(int left_p[2]) {
++    close(left_p[1]);  // close write end of left pipe
++    
++    int p;
++    // check if this is the right most child: no data to read, close read end
++    if (read(left_p[0], &p, sizeof(int)) == 0) {
++        close(left_p[0]);  // no data to read, close read end
++        exit(0);
++    }
++
++    printf("prime %d\n", p);
++
++    // pipe feed to the right child of the current process
++    int right_p[2];
++    pipe(right_p);
++
++    if (fork() > 0) {
++        close(right_p[0]);  // parent only writes to right pipe
++        
++        int n;
++        while (read(left_p[0], &n, sizeof(int)) > 0) {
++            if (n % p != 0) { // if n is not divisible by p, write to right pipe, this serves like a filter
++                write(right_p[1], &n, sizeof(int));
++            }
++        }
++        close(right_p[1]);  // close write end
++        close(left_p[0]);   // close read end
++        wait(0);            // wait for child to finish
++        exit(0);
++    } else {
++        close(left_p[0]);  // close read of left pipe before continuing
++        sieve(right_p);    // recursive call for child process
++    }
++}
++
++
++int
++main(int argc, char* argv[]) {
++
++    // argument checking
++    if (argc != 1) {
++        fprintf(2, "Usage: primes\n");
++        exit(1);
++    }
++
++    // create a pipe
++    int p[2];
++    pipe(p);
++
++    if (fork() > 0) {
++         // parent
++        // feed the numbers from 2 to 280 to the pipe for the child to sieve
++        for (int i = 2; i <= 280; i++) {
++            write(p[1], &i, sizeof(int));
++        }
++        close(p[1]);  // close write end
++        wait(0);      // wait for child to finish
++    } else {
++        // child    
++        sieve(p);
++    }
++    exit(0);
++}
+diff --git a/user/sleep.c b/user/sleep.c
+new file mode 100644
+index 0000000..87b6887
+--- /dev/null
++++ b/user/sleep.c
+@@ -0,0 +1,27 @@
++#include "kernel/types.h"
++#include "user/user.h"
++
++int 
++main(int argc, char *argv[]) {
++
++    // argument checking
++    if (argc == 1) {
++        // 0 stdin, 1 stdout, 2 stderr
++        fprintf(2, "User forget to pass an argument.\n");
++        exit(1);
++    }
++
++    if (argc > 2) {
++        fprintf(2, "User pass too many arguments.\n");
++        exit(1);
++    }
++
++    int ticks = atoi(argv[1]);
++    if (ticks < 0) ticks = 0;
++
++    // argv[1] is string of time
++    
++    fprintf(1, "(nothing happens for a little while)\n");
++    sleep(ticks);    // sleep for some ticks
++    exit(0);
++}
+\ No newline at end of file
+diff --git a/user/xargs.c b/user/xargs.c
+new file mode 100644
+index 0000000..e62d079
+--- /dev/null
++++ b/user/xargs.c
+@@ -0,0 +1,87 @@
++#include "kernel/types.h"
++#include "user/user.h"
++#include "kernel/param.h"
++
++// split the string by delimiter
++char* strtok(char* str, const char* delim) {
++    static char* ptr;
++    if (str) {
++        ptr = str;
++    }
++    if (*ptr == '\0') {
++        return 0;
++    }
++    char* ret = ptr;
++    while (*ptr != '\0' && *ptr != *delim) {
++        ptr++;
++    }
++    if (*ptr == *delim) {
++        *ptr = '\0';
++        ptr++;
++    }
++    return ret;
++}
++
++int
++main(int argc, char* argv[]) {
++
++    // argument checking
++    if (argc < 2) {
++        fprintf(2, "xargs: no command given\n");
++        exit(1);
++    }
++    
++    char* cmd = argv[1];
++    char* args[MAXARG];
++    int i = 0;
++
++    // copy the arguments to a new array
++    // the last argument is the input: echo "hello" | xargs echo bye -> xargs echo bye "hello" 
++    for(i = 1; i < argc; i++) {
++        args[i-1] = argv[i];
++    }
++
++    // read from stdin to c
++    char c;
++
++    // buffer serves as a temporary storage for the input line
++    char buf[512];
++    // count number of characters in the buffer
++    int cnt = 0;
++    while (read(0, &c, sizeof(char)) != 0 ) {
++        // parent
++        // split the input by '\n'
++        // create a child process for each line
++        // child send to the parent argument via a pipe
++
++        if (c == '\n') {
++            buf[cnt] = '\0';
++            if (fork() == 0) {
++                // child
++                // set the last argument to the read line
++                // read from buffer, argument seperated by ' '
++                char* token = strtok(buf, " ");
++                while (token != 0) {
++                    args[argc-1] = token;
++                    token = strtok(0, " ");
++                    argc++;
++                }
++                exec(cmd, args);
++                exit(0);
++            }
++            else {
++                // parent
++                // wait for the child to finish
++                wait(0);
++
++                // reset the buffer
++                cnt = 0;
++                memset(buf, 0, sizeof(buf));
++            }
++        }
++        else {
++            // add c to buffer if c is not '\n'
++            buf[cnt++] = c;
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/util.patch b/util.patch
+new file mode 100644
+index 0000000..8f89bf1
+--- /dev/null
++++ b/util.patch
+@@ -0,0 +1,17 @@
++diff --git a/Makefile b/Makefile
++index 365c91b..3205e36 100644
++--- a/Makefile
+++++ b/Makefile
++@@ -188,7 +188,11 @@ UPROGS=\
++ 	$U/_grind\
++ 	$U/_wc\
++ 	$U/_zombie\
++-
+++	$U/_sleep\
+++ 	$U/_pingpong\
+++	$U/_primes\
+++	$U/_find\
+++	$U/_xargs\
++ 
++ 
++ 
