@@ -1,0 +1,17 @@
+diff --git a/Makefile b/Makefile
+index 365c91b..3205e36 100644
+--- a/Makefile
++++ b/Makefile
+@@ -188,7 +188,11 @@ UPROGS=\
+ 	$U/_grind\
+ 	$U/_wc\
+ 	$U/_zombie\
+-
++	$U/_sleep\
++ 	$U/_pingpong\
++	$U/_primes\
++	$U/_find\
++	$U/_xargs\
+ 
+ 
+ 
