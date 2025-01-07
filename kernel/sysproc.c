@@ -75,6 +75,27 @@ int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 base, mask = 0;
+  int page_num;
+  uint64 user_mask_addr;
+
+  argaddr(0, &base);
+  argint(1, &page_num);
+  argaddr(2, &user_mask_addr);
+
+  struct proc *p = myproc();
+  for (int i = 0; i < page_num; i++) {
+    pte_t *pte = walk(p->pagetable, base + i * PGSIZE, 0);
+    if (pte && (*pte & PTE_V) && (*pte & PTE_A)) { // Check if the page has been accessed
+      mask |= (1L << i); // Set the ith bit
+      *pte &= ~PTE_A; // Clear the access bit
+    }
+  }
+
+  // Copy the bitmask to user space
+  if (copyout(p->pagetable, user_mask_addr, (char *)&mask, sizeof(mask)) < 0)
+    return -1;
+
   return 0;
 }
 #endif
