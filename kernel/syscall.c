@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "syscall.h"
 #include "defs.h"
+#define SYS_MAXARGS 6
 
 // Fetch the uint64 at addr from the current process.
 int
@@ -28,6 +29,35 @@ fetchstr(uint64 addr, char *buf, int max)
   if(copyinstr(p->pagetable, buf, addr, max) < 0)
     return -1;
   return strlen(buf);
+}
+
+int
+fetcharg(int n, int *arg)
+{
+  struct proc *p = myproc();
+  switch (n) {
+  case 0:
+    *arg = p->trapframe->a0;
+    break;
+  case 1:
+    *arg = p->trapframe->a1;
+    break;
+  case 2:
+    *arg = p->trapframe->a2;
+    break;
+  case 3:
+    *arg = p->trapframe->a3;
+    break;
+  case 4:
+    *arg = p->trapframe->a4;
+    break;
+  case 5:
+    *arg = p->trapframe->a5;
+    break;
+  default:
+    return -1; // No more arguments
+  }
+  return 0;
 }
 
 static uint64
@@ -178,5 +208,15 @@ syscall(void)
   if (p->tracemask >> num) {
 	  printf("%d: syscall %s -> %d\n", 
 			  p->pid, syscallnames[num], p->trapframe->a0);
+
+    // Print arguments
+    printf("system call arguments: (");
+    int arg;
+    for (int i = 0; i < SYS_MAXARGS; i++) {
+      if (fetcharg(i, &arg) < 0) break; // Fetch each argument
+      if (i > 0) printf(", ");
+      printf("%d", arg);
+    }
+    printf(") -> %d\n", p->trapframe->a0);
   }
 }
